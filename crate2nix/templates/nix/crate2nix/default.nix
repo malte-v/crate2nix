@@ -160,10 +160,22 @@ rec {
       ${lib.concatMapStringsSep "\n" (output: "ln -s ${crate.${output}} ${"$"}${output}") crate.outputs}
     '';
 
+  defaultWasmOpts = {
+    enable = false;
+    bindgen = {
+      cliPackage = null;
+      target = "web";
+      browser = false;
+      typescript = false;
+      extraOpts = [ ];
+    };
+  };
+
   /* A restricted overridable version of builtRustCratesWithFeatures. */
   buildRustCrateWithFeatures =
     { packageId
     , features ? rootFeatures
+    , wasm ? { }
     , crateOverrides ? defaultCrateOverrides
     , buildRustCrateForPkgsFunc ? null
     , runTests ? false
@@ -173,23 +185,24 @@ rec {
     lib.makeOverridable
       (
         { features
+        , wasm
         , crateOverrides
         , runTests
         , testCrateFlags
         , testInputs
         }:
         let
+          wasmOpts = defaultWasmOpts // wasm;
           buildRustCrateForPkgsFuncOverriden =
             if buildRustCrateForPkgsFunc != null
             then buildRustCrateForPkgsFunc
             else
               (
-                if crateOverrides == pkgs.defaultCrateOverrides
-                then buildRustCrateForPkgs
-                else
-                  pkgs: (buildRustCrateForPkgs pkgs).override {
-                    defaultCrateOverrides = crateOverrides;
-                  }
+                pkgs: crate: (((buildRustCrateForPkgs pkgs).override {
+                  defaultCrateOverrides = crateOverrides;
+                }) crate).override (lib.optionalAttrs wasmOpts.enable {
+                  targetOverride = "wasm32-unknown-unknown";
+                })
               );
           builtRustCrates = builtRustCratesWithFeatures {
             inherit packageId features;
@@ -215,7 +228,7 @@ rec {
         in
         derivation
       )
-      { inherit features crateOverrides runTests testCrateFlags testInputs; };
+      { inherit features wasm crateOverrides runTests testCrateFlags testInputs; };
 
   /* Returns an attr set with packageId mapped to the result of buildRustCrateForPkgsFunc
      for the corresponding crate.
